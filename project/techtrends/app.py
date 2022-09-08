@@ -1,11 +1,28 @@
+import sys
+import logging
 import sqlite3
 
-from flask import Flask, jsonify, json, render_template, request, url_for, redirect, flash
-from werkzeug.exceptions import abort
+from flask import Flask, jsonify, render_template, request, url_for, redirect, flash
+
+total_connection = 0
+
+logging.basicConfig()
+logger = logging.getLogger('app')
+for h in logger.handlers[:]:
+    logger.removeHandler(h)
+    h.close()
+logFormatter = logging.Formatter(fmt='%(levelname)s:%(name)s:%(asctime)s, %(message)s', datefmt='%m/%d/%Y, %H:%M:%S')
+handler = logging.StreamHandler()
+handler.setLevel('DEBUG')
+handler.setFormatter(logFormatter)
+logger.addHandler(handler)
+logger.setLevel('DEBUG')
 
 # Function to get a database connection.
 # This function connects to database with the name `database.db`
 def get_db_connection():
+    global total_connection
+    total_connection += 1
     connection = sqlite3.connect('database.db')
     connection.row_factory = sqlite3.Row
     return connection
@@ -17,6 +34,13 @@ def get_post(post_id):
                         (post_id,)).fetchone()
     connection.close()
     return post
+
+# Function to count the number of post in the database
+def count_post():
+    connection = get_db_connection()
+    count = connection.execute('SELECT count(*) FROM posts').fetchone()
+    connection.close()
+    return count[0]
 
 # Define the Flask application
 app = Flask(__name__)
@@ -36,14 +60,26 @@ def index():
 def post(post_id):
     post = get_post(post_id)
     if post is None:
+      logger.error(f"Article with id \"{post_id}\" does not exist!")
       return render_template('404.html'), 404
     else:
+      logger.info(f"Article \"{post['title']}\" retrieved!")
       return render_template('post.html', post=post)
 
 # Define the About Us page
 @app.route('/about')
 def about():
+    logger.info(f"The \"About Us\" page is retrieved.")
     return render_template('about.html')
+
+@app.route('/healthz')
+def healthz():
+    return jsonify({'result': 'OK - healthy'}), 200
+
+@app.route('/metrics')
+def metrics():
+    global total_connection
+    return jsonify({'db_connection_count': total_connection, 'post_count': count_post()}), 200    
 
 # Define the post creation functionality 
 @app.route('/create', methods=('GET', 'POST'))
@@ -61,6 +97,7 @@ def create():
             connection.commit()
             connection.close()
 
+            logger.info(f"A new article is created with title '{title}'.")
             return redirect(url_for('index'))
 
     return render_template('create.html')
